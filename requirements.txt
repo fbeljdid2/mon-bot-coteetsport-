@@ -3,6 +3,5 @@ uvicorn
 selenium
 webdriver-manager
 pydantic
-
-webdriver-manager
 flask
+webdriver-manager
