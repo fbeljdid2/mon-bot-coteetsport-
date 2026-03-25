@@ -1,18 +1,13 @@
-FROM python:3.9-slim
-
-# Installation des outils nécessaires
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    && rm -rf /var/lib/apt/lists/*
+FROM ://mcr.microsoft.com
 
 WORKDIR /app
 
 COPY . .
 
-# Installation des bibliothèques
 RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install chromium --with-deps
 
-# Commande exacte pour lancer le bot
-CMD ["python", "app.py"]
+# Port utilisé par Railway
+EXPOSE 5000
+
+# Commande de lancement avec Gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
