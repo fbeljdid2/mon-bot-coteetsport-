@@ -1,6 +1,6 @@
 import os
 import time
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -13,56 +13,54 @@ app = Flask(__name__)
 
 def setup_bot():
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless") 
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-    # Ce "User-Agent" est crucial pour que le site MDJS ne bloque pas ton bot
+    # On imite un vrai utilisateur pour ne pas être bloqué
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=chrome_options)
 
-@app.route('/generer-code', methods=['POST'])
-def generer_code():
-    # Ton appli Lovable enverra par exemple : {"match_index": 0} 
-    # (le 1er match de la liste)
+@app.route('/')
+def home():
+    return "Bot Said MDJS en ligne !"
+
+@app.route('/tester-remplissage')
+def tester_remplissage():
     driver = None
     try:
         driver = setup_bot()
-        wait = WebDriverWait(driver, 20) # On attend 20 secondes max
+        wait = WebDriverWait(driver, 20)
         
         # 1. Aller sur le site
         driver.get("https://www.coteetsport.ma")
-        time.sleep(5) # On laisse le temps aux matchs de s'afficher
+        time.sleep(7) # On attend que tout charge bien
 
-        # 2. CLIQUER SUR LA PREMIÈRE COTE DISPONIBLE (Test)
-        # On cherche les boutons qui contiennent les cotes (classe 'odd-button' sur Sisal)
-        boutons_cotes = wait.until(EC.presence_of_all_elements_located((By.CLASS_NAME, "odd-button")))
-        boutons_cotes[0].click() # Clique sur la toute première cote
-        print("Cote sélectionnée !")
-        time.sleep(2)
+        # 2. On cherche un bouton qui contient le mot "FOOTBALL" et on clique
+        try:
+            btn_foot = wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'FOOTBALL')]")))
+            btn_foot.click()
+            time.sleep(3)
+        except:
+            print("Bouton Football non trouvé, on continue...")
 
-        # 3. CLIQUER SUR LE PANIER / RÉSERVATION
-        # Sur le site Sisal, le bouton de réservation a souvent la classe 'booking-button'
-        bouton_reserver = wait.until(EC.element_to_be_clickable((By.ID, "book-button")))
-        bouton_reserver.click()
-        print("Panier ouvert !")
-
-        # 4. RÉCUPÉRER LE CODE ET L'IMAGE
-        # On attend que le code de réservation apparaisse à l'écran
-        code_element = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "booking-code")))
-        code_final = code_element.text
-        
-        # On cherche l'image du code-barres (QR Code)
-        image_element = driver.find_element(By.TAG_NAME, "img") # À affiner selon le site
-        url_barcode = image_element.get_attribute("src")
-
-        return jsonify({
-            "success": True, 
-            "code": code_final,
-            "barcode_url": url_barcode
-        })
+        # 3. On cherche les boutons de cotes (souvent des éléments avec une classe de type 'selection')
+        # On va essayer de cliquer sur le premier bouton qui ressemble à une cote
+        cotes = driver.find_elements(By.CSS_SELECTOR, "[class*='selection'], [class*='odd']")
+        if len(cotes) > 0:
+            cotes[0].click() # On clique sur la 1ère cote
+            time.sleep(2)
+            
+            # 4. On cherche le bouton "RÉSERVER" ou l'icône du panier
+            # Sur Sisal, c'est souvent un bouton en bas ou à droite
+            return jsonify({
+                "success": True, 
+                "message": "Le bot a cliqué sur une cote ! Le panier devrait être rempli."
+            })
+        else:
+            return jsonify({"success": False, "erreur": "Aucune cote trouvée sur la page."})
 
     except Exception as e:
         return jsonify({"success": False, "erreur": str(e)})
