@@ -17,7 +17,7 @@ def setup_bot():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-    # Simulation d'un vrai navigateur pour éviter d'être bloqué
+    # Ce "User-Agent" est crucial pour que le site MDJS ne bloque pas ton bot
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     service = Service(ChromeDriverManager().install())
@@ -25,41 +25,43 @@ def setup_bot():
 
 @app.route('/generer-code', methods=['POST'])
 def generer_code():
-    # On imagine que ton App Lovable envoie {"match": "Real Madrid", "pari": "1"}
-    donnees = request.json
-    match_nom = donnees.get('match')
-    
+    # Ton appli Lovable enverra par exemple : {"match_index": 0} 
+    # (le 1er match de la liste)
     driver = None
     try:
         driver = setup_bot()
-        wait = WebDriverWait(driver, 20)
+        wait = WebDriverWait(driver, 20) # On attend 20 secondes max
         
         # 1. Aller sur le site
         driver.get("https://www.coteetsport.ma")
-        time.sleep(5) # Attente du chargement complet
+        time.sleep(5) # On laisse le temps aux matchs de s'afficher
 
-        # 2. Chercher le match (Exemple simplifié : on clique sur la première cote disponible)
-        # Note: Dans la réalité, il faudrait chercher 'match_nom' dans la page
-        bouton_cote = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".odd-button")))
-        bouton_cote.click()
+        # 2. CLIQUER SUR LA PREMIÈRE COTE DISPONIBLE (Test)
+        # On cherche les boutons qui contiennent les cotes (classe 'odd-button' sur Sisal)
+        boutons_cotes = wait.until(EC.presence_of_all_elements_located((By.CLASS_NAME, "odd-button")))
+        boutons_cotes[0].click() # Clique sur la toute première cote
+        print("Cote sélectionnée !")
         time.sleep(2)
 
-        # 3. Ouvrir le panier et cliquer sur "Générer code de réservation"
-        # Ces sélecteurs (ID/Classe) sont des exemples, ils doivent correspondre au site
-        bouton_panier = wait.until(EC.element_to_be_clickable((By.ID, "booking-button")))
-        bouton_panier.click()
-        
-        # 4. Récupérer le texte du code de réservation (ex: "A12B34")
-        code_element = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "booking-code-value")))
-        code_final = code_element.text
+        # 3. CLIQUER SUR LE PANIER / RÉSERVATION
+        # Sur le site Sisal, le bouton de réservation a souvent la classe 'booking-button'
+        bouton_reserver = wait.until(EC.element_to_be_clickable((By.ID, "book-button")))
+        bouton_reserver.click()
+        print("Panier ouvert !")
 
-        # 5. Récupérer l'image du QR Code / Code-barres
-        qr_code_url = driver.find_element(By.ID, "barcode-img").get_attribute("src")
+        # 4. RÉCUPÉRER LE CODE ET L'IMAGE
+        # On attend que le code de réservation apparaisse à l'écran
+        code_element = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "booking-code")))
+        code_final = code_element.text
+        
+        # On cherche l'image du code-barres (QR Code)
+        image_element = driver.find_element(By.TAG_NAME, "img") # À affiner selon le site
+        url_barcode = image_element.get_attribute("src")
 
         return jsonify({
             "success": True, 
-            "code_reservation": code_final,
-            "image_url": qr_code_url
+            "code": code_final,
+            "barcode_url": url_barcode
         })
 
     except Exception as e:
