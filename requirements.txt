@@ -1,5 +1,6 @@
-flask==3.0.0
-selenium==4.15.2
-gunicorn==22.0.0
-webdriver-manager==4.0.2
+flask
 flask-cors
+gunicorn
+playwright
+playwright-stealth
+python-dotenv
