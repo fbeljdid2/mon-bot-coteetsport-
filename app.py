@@ -1,11 +1,13 @@
-from flask import Flask
-
+from flask import Flask, request, jsonify
 app = Flask(__name__)
 
-@app.route("/")
+@app.route('/')
 def home():
-    return "Bot coteetsport OK"
+    return "Bot en ligne !"
 
-@app.route("/test-clic")
+@app.route('/test-clic')
 def test_clic():
-    return "Route test-clic OK"
+    return "Test réussi - prêt pour Selenium."
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
