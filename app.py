@@ -1,28 +1,30 @@
 import os
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # Permet la connexion avec l'application mobile
 from playwright.sync_api import sync_playwright
 from playwright_stealth import stealth_sync
 
 app = Flask(__name__)
+CORS(app) # Autorise ton application à parler au bot Railway
 
-# Identifiants Railway (EMAIL et PASSWORD)
+# Identifiants Railway
 EMAIL = os.getenv('EMAIL')
 PASSWORD = os.getenv('PASSWORD')
 
 @app.route('/')
 def home():
-    # Réponse en JSON pour éviter les erreurs de lecture de Base44
     return jsonify({
         "status": "online",
-        "bot": "Paris Match IA",
-        "message": "En attente de pronostics sur /generer-barcode"
+        "message": "Bot Paris Match IA pret pour SISAL",
+        "endpoint": "/generer-barcode"
     })
 
 @app.route('/generer-barcode', methods=['POST'])
 def generer_barcode():
+    # On récupère les matchs envoyés par l'application
     data = request.get_json()
     if not data:
-        return jsonify({"status": "erreur", "message": "Aucune donnee recue"}), 400
+        return jsonify({"status": "erreur", "message": "Aucun match recu"}), 400
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -31,37 +33,48 @@ def generer_barcode():
         stealth_sync(page)
 
         try:
-            # 1. Connexion au site Sisal
+            # 1. Aller sur le site Sisal MDJS
             page.goto('https://www.coteetsport.ma', wait_until="networkidle")
+            
+            # 2. Connexion automatique
             page.click('text="Connexion"')
+            page.wait_for_selector('input[name="email"]')
             page.fill('input[name="email"]', EMAIL)
             page.fill('input[name="password"]', PASSWORD)
             page.click('button[type="submit"]')
             page.wait_for_timeout(3000)
 
-            # 2. Ajout des pronostics au panier
+            # 3. Ajout des matchs au panier
+            # Si data est une liste : [{"match": "Safi vs Berkane"}]
+            matches_ajoutes = []
             for item in data:
                 nom_match = item.get("match")
                 if nom_match:
-                    page.click(f'text="{nom_match}"', timeout=3000)
+                    # On clique sur le nom du match pour l'ajouter
+                    page.click(f'text="{nom_match}"', timeout=4000)
+                    matches_ajoutes.append(nom_match)
                     page.wait_for_timeout(1000)
 
-            # 3. Récupération du code de réservation
+            # 4. Générer le code de réservation final
             page.goto('https://www.coteetsport.ma')
-            page.click('button:has-text("Générer")')
-            page.wait_for_timeout(4000)
+            page.click('button:has-text("Générer"), button:has-text("Valider")')
+            page.wait_for_timeout(5000)
             
-            # On récupère le texte du code généré
-            code_final = page.locator('.reservation-code').first.inner_text()
+            # On récupère le texte du code (ex: A123B45)
+            code_final = page.locator('.reservation-code, .code-value').first.inner_text()
 
             browser.close()
-            return jsonify({"status": "success", "barcode": code_final})
+            return jsonify({
+                "status": "success",
+                "barcode": code_final,
+                "matches": matches_ajoutes
+            })
 
         except Exception as e:
             browser.close()
             return jsonify({"status": "erreur", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    # FORCE LE PORT 8080 POUR ÉVITER LE CRASH RAILWAY
+    # Port 8080 obligatoire pour Railway
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
