@@ -73,8 +73,8 @@ def generer_barcode():
         except Exception as e:
             browser.close()
             return jsonify({"status": "erreur", "message": str(e)}), 500
-
 if __name__ == "__main__":
-    # Port 8080 obligatoire pour Railway
+    # On utilise le port que Railway nous donne ou 8080 par défaut
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=False)
+
