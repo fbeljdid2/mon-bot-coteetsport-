@@ -3,3 +3,6 @@ nixPkgs = ["python311", "playwright-driver"]
 
 [phases.build]
 cmds = ["pip install -r requirements.txt", "playwright install chromium"]
+
+[start]
+cmd = "python app.py"
