@@ -1,53 +1,47 @@
 import os
 import asyncio
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # Important pour Lovable
 from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async # Pour éviter le blocage
 
 app = Flask(__name__)
+CORS(app) # Autorise Lovable à appeler ton bot
 
-# Fonction pour gérer la logique du navigateur
-async def run_browser_logic(matchs):
+async def bot_logic(matchs):
     async with async_playwright() as p:
-        # Configuration spécifique pour Railway (headless=True est obligatoire)
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
-        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        context = await browser.new_context()
         page = await context.new_page()
+        
+        # Appliquer le mode "furtif" pour ne pas être bloqué
+        await stealth_async(page)
 
         try:
-            # 1. Aller sur le site
             await page.goto("https://www.coteetsport.ma", wait_until="networkidle")
             
-            # 2. Logique de remplissage (Exemple de clic par sélecteur)
-            for m in matchs:
-                # IMPORTANT : Tu dois trouver le sélecteur exact du bouton de cote
-                # Exemple : cliquer sur la cote '1' du match avec l'ID envoyé par Lovable
-                # selector = f"div[data-match-id='{m['id']}'] .outcome-1"
-                # await page.click(selector)
-                pass
-
-            # 3. Cliquer sur le bouton de réservation (à adapter au vrai ID du bouton)
-            await page.click("#btn-generate-qr") 
+            # --- ICI : Ta logique de clic sur les matchs ---
+            # Exemple : await page.click(f"text={matchs[0]['nom']}")
             
-            # 4. Attendre le code-barres et prendre une photo ou l'URL
-            barcode_element = await page.wait_for_selector("#qr-code-img")
+            # Attendre et récupérer le code-barres
+            # Remplace '.le-selecteur-du-code' par le vrai nom du bouton/image
+            barcode_element = await page.wait_for_selector(".barcode-image", timeout=20000)
             barcode_url = await barcode_element.get_attribute("src")
             
             await browser.close()
-            return {"statut": "success", "barcode_url": barcode_url}
-
+            return {"status": "success", "url": barcode_url}
         except Exception as e:
             await browser.close()
-            return {"statut": "erreur", "message": str(e)}
+            return {"status": "error", "message": str(e)}
 
 @app.route('/generer-billet', methods=['POST'])
-def generer_billet():
+def handle_request():
     data = request.json
-    matchs = data.get('matchs', [])
-    
-    # Exécuter la logique asynchrone dans Flask
-    resultat = asyncio.run(run_browser_logic(matchs))
-    
-    return jsonify(resultat)
+    # On lance la boucle asynchrone pour Playwright
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    result = loop.run_until_complete(bot_logic(data.get('matchs', [])))
+    return jsonify(result)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
