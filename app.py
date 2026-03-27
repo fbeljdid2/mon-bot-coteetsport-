@@ -5,57 +5,50 @@ from playwright.async_api import async_playwright
 
 app = Flask(__name__)
 
-# Route pour recevoir les données de Lovable
-@app.route('/generer-billet', methods=['POST'])
-async def generer_billet():
-    # 1. Récupération des données envoyées par Lovable
-    # Format attendu : {"matchs": [{"equipe": "Real Madrid", "pronostic": "1"}, ...]}
-    data = request.json
-    matchs = data.get('matchs', [])
-    
-    if not matchs:
-        return jsonify({"erreur": "Aucun match reçu"}), 400
-
+# Fonction pour gérer la logique du navigateur
+async def run_browser_logic(matchs):
     async with async_playwright() as p:
-        # Lancement du navigateur (indispensable pour Railway)
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+        # Configuration spécifique pour Railway (headless=True est obligatoire)
+        browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
         context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         page = await context.new_page()
 
         try:
-            # 2. Navigation vers le site officiel MDJS
-            await page.goto("https://www.coteetsport.ma", timeout=60000)
+            # 1. Aller sur le site
+            await page.goto("https://www.coteetsport.ma", wait_until="networkidle")
             
-            # --- LOGIQUE DE REMPLISSAGE DU PANIER ---
-            # Pour chaque match reçu, le bot doit cliquer sur les bonnes cotes.
-            # Exemple simplifié (à adapter selon les sélecteurs précis du site) :
-            for match in matchs:
-                # On cherche le match par son nom sur la page
-                # await page.get_by_text(match['equipe']).click()
-                pass 
+            # 2. Logique de remplissage (Exemple de clic par sélecteur)
+            for m in matchs:
+                # IMPORTANT : Tu dois trouver le sélecteur exact du bouton de cote
+                # Exemple : cliquer sur la cote '1' du match avec l'ID envoyé par Lovable
+                # selector = f"div[data-match-id='{m['id']}'] .outcome-1"
+                # await page.click(selector)
+                pass
+
+            # 3. Cliquer sur le bouton de réservation (à adapter au vrai ID du bouton)
+            await page.click("#btn-generate-qr") 
             
-            # 3. Cliquer sur le bouton "Générer code de réservation"
-            # await page.click("#bouton-reserver") 
-            
-            # 4. Capturer le code-barres (Image ou URL)
-            # On attend que l'élément apparaisse
-            barcode_element = await page.wait_for_selector(".barcode-image-selector", timeout=10000)
+            # 4. Attendre le code-barres et prendre une photo ou l'URL
+            barcode_element = await page.wait_for_selector("#qr-code-img")
             barcode_url = await barcode_element.get_attribute("src")
             
             await browser.close()
-            
-            # Renvoi du résultat à Lovable
-            return jsonify({
-                "statut": "success",
-                "barcode_url": barcode_url
-            })
+            return {"statut": "success", "barcode_url": barcode_url}
 
         except Exception as e:
             await browser.close()
-            return jsonify({"statut": "erreur", "message": str(e)}), 500
+            return {"statut": "erreur", "message": str(e)}
+
+@app.route('/generer-billet', methods=['POST'])
+def generer_billet():
+    data = request.json
+    matchs = data.get('matchs', [])
+    
+    # Exécuter la logique asynchrone dans Flask
+    resultat = asyncio.run(run_browser_logic(matchs))
+    
+    return jsonify(resultat)
 
 if __name__ == "__main__":
-    # Railway utilise dynamiquement le port défini dans ses variables d'environnement
     port = int(os.environ.get("PORT", 8080))
-    # Utilisation d'un serveur compatible avec l'asynchrone (pour Playwright)
     app.run(host='0.0.0.0', port=port)
