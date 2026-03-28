@@ -32,3 +32,4 @@ EXPOSE 8080
 # Lancer avec Gunicorn pour plus de stabilité avec Lovable
 # --timeout 120 est crucial car le bot met du temps à cliquer sur MDJS
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "120", "app:app"]
+RUN playwright install --with-deps chromium
