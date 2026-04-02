@@ -1,67 +1,82 @@
 import os
+import logging
 from flask import Flask, request, jsonify
 from playwright.sync_api import sync_playwright
 
+# Configuration des logs pour voir les erreurs sur Railway
+logging.basicConfig(level=logging.INFO)
+
 app = Flask(__name__)
 
-def get_sisal_barcode(match_name, prono_val):
+# --- ROUTE DE SÉCURITÉ POUR RAILWAY (Indispensable) ---
+@app.route('/')
+@app.route('/health')
+def home():
+    return "Le bot est en ligne et prêt !", 200
+
+# --- FONCTION PRINCIPALE : NAVIGATION SUR MDJS ---
+def get_mdjs_reservation(match_name, prono_val):
     with sync_playwright() as p:
-        # Lancement du navigateur (mode sans interface pour Railway)
+        # Lancement du navigateur (indispensable en mode headless sur Railway)
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        page = context.new_page()
         
         try:
-            # 1. Aller sur le site officiel
-            page.goto("https://coteetsport.ma", timeout=60000)
+            logging.info(f"Tentative pour : {match_name} avec prono {prono_val}")
             
-            # 2. Rechercher le match (simulation de frappe dans la barre de recherche)
-            # Note: Le site MDJS est complexe, on cherche ici le texte du match
-            page.get_by_placeholder("Rechercher un match").fill(match_name)
-            page.keyboard.press("Enter")
-            page.wait_for_timeout(2000) # Attendre que les résultats s'affichent
+            # 1. Aller sur le site
+            page.goto("https://coteetsport.ma", timeout=60000, wait_until="networkidle")
+            
+            # 2. Simulation de recherche (Exemple simplifié)
+            # Note : Le site MDJS utilise souvent des popups, on les ferme si besoin
+            if page.locator(".close-modal").is_visible():
+                page.click(".close-modal")
 
-            # 3. Cliquer sur le pronostic (Ex: "1", "X", ou "2")
-            # On cherche un bouton qui contient le texte du prono
-            page.get_by_text(prono_val, exact=True).first.click()
+            # Ici, le code doit être adapté aux sélecteurs EXACTS du site
+            # Pour l'instant, on simule la réussite pour tester la communication
             
-            # 4. Ouvrir le panier et générer le code
-            # Ces sélecteurs dépendent de la structure exacte du site au moment T
-            page.click(".cart-icon") # Exemple de classe CSS pour le panier
-            page.click("#generate-code-button") # Exemple d'ID pour générer le code
+            # --- CODE DE GÉNÉRATION ICI ---
+            # (C'est ici qu'on ajoute les clics précis sur les boutons du site)
             
-            # 5. Attendre l'apparition du code-barres et prendre une photo
-            barcode_element = page.locator(".barcode-image-class")
-            image_path = "barcode.png"
-            barcode_element.screenshot(path=image_path)
-            
-            # Ici, il faudrait normalement uploader l'image vers un service 
-            # comme Imgur ou Cloudinary pour avoir une URL publique.
-            # Pour l'exemple, on simule l'URL :
-            barcode_url = "https://votre-app-railway.app"
+            barcode_url = "https://votre-site.com" # Remplacez par l'URL finale
             
             browser.close()
-            return barcode_url
+            return {"status": "success", "url": barcode_url}
+
         except Exception as e:
+            logging.error(f"Erreur Playwright : {str(e)}")
             browser.close()
-            return str(e)
+            return {"status": "error", "message": str(e)}
 
+# --- ROUTE APPELÉE PAR LOVABLE / BASE44 ---
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "Aucune donnée JSON reçue"}), 400
+
     match = data.get("match")
     prono = data.get("prono")
 
     if not match or not prono:
-        return jsonify({"status": "error", "message": "Données manquantes"}), 400
+        return jsonify({"status": "error", "message": "Champs 'match' ou 'prono' manquants"}), 400
 
-    # Appel de la fonction de navigation
-    result_url = get_sisal_barcode(match, prono)
+    # Lancement de la procédure automatisée
+    result = get_mdjs_reservation(match, prono)
 
-    if "http" in result_url:
-        return jsonify({"status": "success", "barcode_url": result_url})
+    if result["status"] == "success":
+        return jsonify({
+            "status": "success",
+            "barcode_url": result["url"]
+        })
     else:
-        return jsonify({"status": "error", "details": result_url})
+        return jsonify({
+            "status": "error",
+            "details": result["message"]
+        }), 500
 
 if __name__ == '__main__':
+    # Railway utilise la variable d'environnement PORT
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
