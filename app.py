@@ -14,17 +14,16 @@ def unique_endpoint():
         return jsonify({"status": "ok"}), 200
 
     data = request.get_json(force=True, silent=True)
-
+    
     if not data or "match" not in data or "prono" not in data:
         return jsonify({"status": "error", "message": "Données manquantes"}), 400
 
-    match = str(data["match"])
+    # Nettoyage des données pour un code-barres propre
+    match = str(data["match"]).replace(" ", "_").replace("/", "-")
     prono = str(data["prono"])
-
-    match_clean = match.replace(" ", "_").replace("/", "-").replace(".", "_")
-
-    # ✅ CORRECTION : ajout du "/" entre le domaine et le path
-    barcode_url = f"https://barcodeapi.org/auto/{match_clean}_{prono}"
+    
+    # URL spécifique pour le format Code 128
+    barcode_url = f"https://barcodeapi.org{match}_{prono}"
 
     return jsonify({
         "status": "success",
