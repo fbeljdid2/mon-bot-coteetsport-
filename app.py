@@ -3,34 +3,28 @@ from flask_cors import CORS
 import os
 
 app = Flask(__name__)
-# Autorisation totale pour Lovable
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 @app.route("/", methods=["GET", "POST", "OPTIONS"])
 def unique_endpoint():
-    # Test navigateur
     if request.method == "GET":
         return jsonify({"status": "ok", "message": "Bot Sisal/MDJS prêt !"})
 
-    # Sécurité navigateur
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
 
-    # Reception des données de Lovable
     data = request.get_json(force=True, silent=True)
-    
+
     if not data or "match" not in data or "prono" not in data:
         return jsonify({"status": "error", "message": "Données manquantes"}), 400
 
     match = str(data["match"])
     prono = str(data["prono"])
-    
-    # Nettoyage du nom pour éviter les erreurs d'URL
+
     match_clean = match.replace(" ", "_").replace("/", "-").replace(".", "_")
-    
-    # --- CORRECTION DE L'URL ICI ---
-    # L'adresse exacte doit être barcodeapi.org (sans le z)
-    barcode_url = f"https://barcodeapi.org{match_clean}_{prono}"
+
+    # ✅ CORRECTION : ajout du "/" entre le domaine et le path
+    barcode_url = f"https://barcodeapi.org/auto/{match_clean}_{prono}"
 
     return jsonify({
         "status": "success",
