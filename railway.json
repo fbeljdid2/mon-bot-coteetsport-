@@ -1,0 +1,6 @@
+{
+  "deploy": {
+    "healthcheckTimeout": 300,
+    "restartPolicy": "on-failure"
+  }
+}
