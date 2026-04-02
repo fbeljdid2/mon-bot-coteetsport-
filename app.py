@@ -1,52 +1,53 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import time
 import os
 
 app = Flask(__name__)
 
-# Configuration optimisée du CORS :
-# On autorise toutes les origines (*) et on s'assure que les méthodes 
-# et les en-têtes (headers) comme 'Content-Type' passent sans blocage.
+# Autorise Lovable à envoyer des requêtes à ton bot
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 @app.route("/", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "message": "Bot actif et prêt !"})
+    """Vérifie si le bot est en ligne"""
+    return jsonify({"status": "ok", "message": "Bot Sisal/MDJS actif !"})
 
-@app.route("/", methods=["POST", "OPTIONS"]) # Ajout de OPTIONS pour le "pre-flight" CORS
+@app.route("/", methods=["POST", "OPTIONS"])
 def generer_barcode():
     """
-    Reçoit : {"match": "Equipe A vs Equipe B", "prono": "1"}
-    Renvoie : {"status": "success", "barcode_url": "https://..."}
+    Reçoit les données de Lovable et génère le code-barres.
+    Format attendu : {"match": "Nom", "prono": "1"}
     """
-    # Gestion des requêtes de vérification du navigateur (Pre-flight)
+    # Gestion de la vérification de sécurité du navigateur
     if request.method == "OPTIONS":
         return jsonify({"status": "ok"}), 200
 
+    # Récupération des données envoyées par Lovable
     data = request.get_json(force=True, silent=True)
 
     if not data or "match" not in data or "prono" not in data:
         return jsonify({
             "status": "error", 
-            "error": "Champs 'match' et 'prono' requis"
+            "error": "Données manquantes (match ou prono)"
         }), 400
 
     match = data["match"]
     prono = data["prono"]
 
-    print(f"[BOT] Match reçu : {match} | Prono : {prono}")
+    print(f"[BOT] Requête reçue pour : {match} | Pronostic : {prono}")
 
-    # --- Exemple : génération d'un code-barres fictif ---
-    # Cette URL génère une image réelle de code-barres basée sur tes données
-    barcode_url = f"https://barcodeapi.org/api/128/{match.replace(' ', '_')}_{prono}"
+    # Génération de l'URL du code-barres (Format Code 128)
+    # On nettoie le nom du match pour l'URL
+    match_clean = match.replace(" ", "_").replace("/", "-")
+    barcode_url = f"https://barcodeapi.org{match_clean}_{prono}"
 
+    # Réponse que Lovable va lire pour afficher l'image
     return jsonify({
         "status": "success",
         "barcode_url": barcode_url
     })
 
 if __name__ == "__main__":
-    # Railway utilise la variable d'environnement PORT
+    # Railway définit automatiquement le port via cette variable
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
