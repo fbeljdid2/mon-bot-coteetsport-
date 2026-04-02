@@ -23,7 +23,7 @@ def unique_endpoint():
     prono = str(data["prono"])
     
     # URL spécifique pour le format Code 128
-    barcode_url = f"https://barcodeapi.org{match}_{prono}"
+    barcode_url = f"https://barcodeapi.org/api/128/{match}_{prono}"
 
     return jsonify({
         "status": "success",
