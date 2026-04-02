@@ -2,5 +2,4 @@ Flask
 flask-cors
 gunicorn
 playwright
-
-
+pytest-playwright
