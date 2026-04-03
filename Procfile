@@ -1,1 +1,1 @@
-web: playwright install chromium && gunicorn --timeout 120 app:app
+web: playwright install --with-deps chromium && gunicorn --timeout 120 app:app
