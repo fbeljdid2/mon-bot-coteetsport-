@@ -1,48 +1,50 @@
-import os
-from flask import Flask, request, jsonify
+ from flask import Flask, request, jsonify
 from playwright.sync_api import sync_playwright
+import os
 
 app = Flask(__name__)
 
-def generate_barcode_logic(match, prono, mise):
-    with sync_playwright() as p:
-        # Configuration spécifique pour éviter les crashs sur serveur
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu"])
-        context = browser.new_context(ignore_https_errors=True)
-        page = context.new_page()
-        
-        try:
-            # Navigation vers le site
-            page.goto("https://coteetsport.ma", wait_until="networkidle", timeout=60000)
-            
-            # --- AJOUTEZ ICI VOS CLICS ET REMPLISSAGE DE PANIER ---
-            # Pour le test, on simule une URL de retour
-            barcode_url = "https://coteetsport.ma/images/barcode_placeholder.png"
-            
-            browser.close()
-            return barcode_url
-        except Exception as e:
-            print(f"Erreur Playwright: {e}")
-            browser.close()
-            return None
-
-@app.route('/predict', methods=['POST'])
+@app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
-    if not data:
-        return jsonify({"status": "error", "message": "JSON vide"}), 400
+    match = data.get("match", "")
+    prono = data.get("prono", "")
+    mise = data.get("mise", "")
 
-    match = data.get("match")
-    prono = data.get("prono")
-    mise = data.get("mise")
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
+            )
+            page = browser.new_page()
 
-    url = generate_barcode_logic(match, prono, mise)
+            # Navigue vers le site et remplis le formulaire
+            page.goto("https://www.coteetsport.ma", timeout=60000)
+            # --- Adapte ici selon le formulaire reel du site ---
+            # page.fill("#match-input", match)
+            # page.fill("#prono-input", prono)
+            # page.fill("#mise-input", mise)
+            # page.click("#submit-btn")
+            # page.wait_for_selector("#barcode-img", timeout=60000)
+            # barcode_url = page.get_attribute("#barcode-img", "src")
 
-    if url:
-        return jsonify({"status": "success", "barcode_url": url})
-    return jsonify({"status": "error", "message": "Echec generation"}), 500
+            # Placeholder - remplace par ta vraie logique
+            barcode_url = "https://via.placeholder.com/300x100?text=BARCODE"
 
-if __name__ == '__main__':
-    # Railway impose d'écouter sur 0.0.0.0 et sur le port fourni par l'environnement
+            browser.close()
+
+        return jsonify({"status": "success", "barcode_url": barcode_url})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
+
+
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
