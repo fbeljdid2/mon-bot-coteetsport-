@@ -2,8 +2,14 @@ from flask import Flask, request, jsonify
 from playwright.sync_api import sync_playwright
 import os
 import base64
+import time
 
 app = Flask(__name__)
+
+# ====== METS TES IDENTIFIANTS ICI ======
+MDJS_EMAIL = os.environ.get("MDJS_EMAIL", "ton_email@gmail.com")
+MDJS_PASSWORD = os.environ.get("MDJS_PASSWORD", "ton_mot_de_passe")
+# ======================================
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -24,37 +30,20 @@ def predict():
             )
             page = context.new_page()
 
-            # Aller sur le site
-            page.goto("https://www.coteetsport.ma", timeout=60000, wait_until="networkidle")
+            # 1. Se connecter
+            page.goto("https://zonereservee.coteetsport.ma/login", timeout=60000, wait_until="networkidle")
+            time.sleep(2)
 
-            # Remplir le match
-            page.wait_for_selector("input[name='match'], input[placeholder*='match'], #match", timeout=15000)
-            page.fill("input[name='match'], input[placeholder*='match'], #match", match)
+            page.fill("input[type='email'], input[name='username'], #username", MDJS_EMAIL)
+            page.fill("input[type='password'], input[name='password'], #password", MDJS_PASSWORD)
+            page.click("button[type='submit'], input[type='submit']")
+            page.wait_for_load_state("networkidle", timeout=30000)
+            time.sleep(3)
 
-            # Remplir le prono
-            page.fill("input[name='prono'], input[placeholder*='prono'], #prono", prono)
-
-            # Remplir la mise
-            page.fill("input[name='mise'], input[placeholder*='mise'], #mise", mise)
-
-            # Cliquer sur le bouton de validation
-            page.click("button[type='submit'], input[type='submit'], button:has-text('Valider'), button:has-text('Générer')")
-
-            # Attendre le code-barres
-            page.wait_for_selector("img[src*='barcode'], img[alt*='barcode'], img[alt*='code'], canvas, #barcode, .barcode", timeout=30000)
-
-            # Capturer screenshot de la zone du barcode
-            barcode_el = page.query_selector("img[src*='barcode'], img[alt*='barcode'], img[alt*='code'], canvas, #barcode, .barcode")
-            
-            if barcode_el:
-                screenshot_bytes = barcode_el.screenshot()
-                b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
-                barcode_url = f"data:image/png;base64,{b64}"
-            else:
-                # Screenshot de toute la page en fallback
-                screenshot_bytes = page.screenshot(full_page=False)
-                b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
-                barcode_url = f"data:image/png;base64,{b64}"
+            # 2. Prendre screenshot du billet/confirmation (adapter selon le vrai flux du site)
+            screenshot_bytes = page.screenshot(full_page=False)
+            b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
+            barcode_url = f"data:image/png;base64,{b64}"
 
             browser.close()
 
