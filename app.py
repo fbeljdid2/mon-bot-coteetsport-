@@ -5,75 +5,56 @@ import base64
 
 app = Flask(__name__)
 
-MDJS_EMAIL = os.environ.get("MDJS_EMAIL", "")
-MDJS_PASSWORD = os.environ.get("MDJS_PASSWORD", "")
-
 @app.route("/predict", methods=["POST"])
 def predict():
     data = request.get_json()
-    match = data.get("match", "")        # ex: "Constantine vs Oran"
-    prono = data.get("prono", "")        # ex: "X" ou "1" ou "2"
-    mise = data.get("mise", "10")        # ex: "20"
+    match = data.get("match", "")
+    prono = data.get("prono", "")
+    mise = data.get("mise", "")
 
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"]
+                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
             )
-            context = browser.new_context()
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
             page = context.new_page()
 
-            # 1. Connexion
-            page.goto("https://zonereservee.coteetsport.ma/login", timeout=60000)
-            page.fill("input[type='email'], input[name='email'], #email", MDJS_EMAIL)
-            page.fill("input[type='password'], input[name='password'], #password", MDJS_PASSWORD)
-            page.click("button[type='submit']")
-            page.wait_for_load_state("networkidle", timeout=30000)
+            # Aller sur le site
+            page.goto("https://www.coteetsport.ma", timeout=60000, wait_until="networkidle")
 
-            # 2. Aller sur Cote & Sport
-            page.goto("https://www.coteetsport.ma/cote-sport", timeout=60000)
-            page.wait_for_load_state("networkidle", timeout=30000)
+            # Remplir le match
+            page.wait_for_selector("input[name='match'], input[placeholder*='match'], #match", timeout=15000)
+            page.fill("input[name='match'], input[placeholder*='match'], #match", match)
 
-            # 3. Chercher le match par nom
-            teams = match.split(" vs ")
-            home_team = teams[0].strip() if len(teams) > 0 else match
+            # Remplir le prono
+            page.fill("input[name='prono'], input[placeholder*='prono'], #prono", prono)
 
-            match_element = page.locator(f"text={home_team}").first
-            if match_element:
-                match_element.click()
-                page.wait_for_load_state("networkidle", timeout=15000)
+            # Remplir la mise
+            page.fill("input[name='mise'], input[placeholder*='mise'], #mise", mise)
 
-            # 4. Selectionner le pronostic (1, X, 2)
-            prono_map = {"1": 0, "X": 1, "2": 2}
-            prono_index = prono_map.get(prono.upper(), 0)
+            # Cliquer sur le bouton de validation
+            page.click("button[type='submit'], input[type='submit'], button:has-text('Valider'), button:has-text('Générer')")
 
-            bet_buttons = page.locator(".odd-button, .cote-button, [class*='odd'], [class*='bet']").all()
-            if len(bet_buttons) > prono_index:
-                bet_buttons[prono_index].click()
-                page.wait_for_timeout(2000)
+            # Attendre le code-barres
+            page.wait_for_selector("img[src*='barcode'], img[alt*='barcode'], img[alt*='code'], canvas, #barcode, .barcode", timeout=30000)
 
-            # 5. Entrer la mise
-            mise_input = page.locator("input[placeholder*='mise'], input[placeholder*='montant'], .stake-input").first
-            if mise_input:
-                mise_input.fill(str(mise))
-                page.wait_for_timeout(1000)
-
-            # 6. Valider le pari
-            page.locator("button:has-text('Valider'), button:has-text('Jouer'), button:has-text('Confirmer')").first.click()
-            page.wait_for_timeout(5000)
-
-            # 7. Capturer le code-barres
-            barcode_element = page.locator("[class*='barcode'], [class*='code-barre'], canvas, img[alt*='barcode'], img[alt*='code']").first
-
-            if barcode_element and barcode_element.is_visible():
-                barcode_bytes = barcode_element.screenshot()
-                barcode_b64 = base64.b64encode(barcode_bytes).decode('utf-8')
-                barcode_url = f"data:image/png;base64,{barcode_b64}"
+            # Capturer screenshot de la zone du barcode
+            barcode_el = page.query_selector("img[src*='barcode'], img[alt*='barcode'], img[alt*='code'], canvas, #barcode, .barcode")
+            
+            if barcode_el:
+                screenshot_bytes = barcode_el.screenshot()
+                b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
+                barcode_url = f"data:image/png;base64,{b64}"
             else:
-                page_bytes = page.screenshot()
-                barcode_b64 = base64.b64encode(page_bytes).decode('utf-8')
-                barcode_url = f"data:image/png;base64,{barcode_b64}"
+                # Screenshot de toute la page en fallback
+                screenshot_bytes = page.screenshot(full_page=False)
+                b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
+                barcode_url = f"data:image/png;base64,{b64}"
 
             browser.close()
 
