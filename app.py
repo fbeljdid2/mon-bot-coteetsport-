@@ -57,7 +57,7 @@ def generate_barcode():
  time.sleep(5)
  barcode_element = page.query_selector(
  '.barcode, [class*="barcode"], img[alt*="code"]'
-    )
+ )
  if barcode_element:
  screenshot = barcode_element.screenshot()
  barcode_b64 = base64.b64encode(screenshot).decode('utf-8')
