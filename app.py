@@ -4,6 +4,10 @@ from playwright.sync_api import sync_playwright
 import time
 import base64
 import os
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
@@ -13,6 +17,7 @@ def generate_barcode():
     data = request.json
     matches = data.get('matches', [])
     mise = data.get('mise', '10')
+    logger.info(f"Received request: {len(matches)} matches, mise={mise}")
 
     try:
         with sync_playwright() as p:
@@ -32,12 +37,15 @@ def generate_barcode():
             context = browser.new_context(ignore_https_errors=True)
             page = context.new_page()
 
+            logger.info("Navigating to coteetsport.ma...")
             page.goto('http://coteetsport.ma', timeout=60000)
             page.wait_for_load_state('networkidle')
+            logger.info("Page loaded")
 
             for match_data in matches:
                 match_name = match_data.get('match', '')
                 prono = match_data.get('prono', '')
+                logger.info(f"Processing: {match_name} -> {prono}")
 
                 search_input = page.query_selector('input[type="search"], input[placeholder*="cherch"]')
                 if search_input:
@@ -77,6 +85,7 @@ def generate_barcode():
             })
 
     except Exception as e:
+        logger.error(f"Error: {str(e)}")
         return jsonify({
             "status": "error",
             "error": str(e)
