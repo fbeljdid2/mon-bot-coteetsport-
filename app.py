@@ -1,126 +1,126 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
-import time
 import base64
 import os
-import random
+import time
 
 app = Flask(__name__)
-CORS(app)
-
-REALISTIC_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-}
-
-def human_type(page, selector, text):
-    element = page.query_selector(selector)
-    if element:
-        element.click()
-        time.sleep(random.uniform(0.3, 0.7))
-        for char in text:
-            element.type(char, delay=random.randint(50, 150))
-            time.sleep(random.uniform(0.05, 0.15))
 
 @app.route('/generate', methods=['POST'])
-def generate_barcode():
+def generate():
     data = request.json
     matches = data.get('matches', [])
-    mise = data.get('mise', '10')
+    stake = str(data.get('stake', 10))
 
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-blink-features=AutomationControlled',
-                    '--ignore-certificate-errors',
-                    '--ignore-certificate-errors-spki-list',
-                    '--disable-web-security',
-                    '--allow-running-insecure-content'
-                ]
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
             )
             context = browser.new_context(
-                ignore_https_errors=True,
-                user_agent=REALISTIC_HEADERS["User-Agent"],
-                viewport={"width": 1366, "height": 768},
-                locale="fr-FR",
-                timezone_id="Africa/Casablanca",
-                extra_http_headers=REALISTIC_HEADERS
+                viewport={'width': 1280, 'height': 800},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             )
             page = context.new_page()
-            stealth_sync(page)
 
-            page.goto('http://coteetsport.ma', timeout=60000)
-            page.wait_for_load_state('networkidle')
-            time.sleep(random.uniform(2, 4))
+            page.goto('https://coteetsport.ma', timeout=60000, wait_until='domcontentloaded')
+            time.sleep(4)
 
             for match_data in matches:
                 match_name = match_data.get('match', '')
                 prono = match_data.get('prono', '')
 
-                search_input = page.query_selector('input[type="search"], input[placeholder*="cherch"]')
-                if search_input:
-                    search_input.fill(match_name.split(' vs ')[0])
-                    time.sleep(random.uniform(1.5, 3))
+                # Try search input
+                try:
+                    search_sel = 'input[type="search"], input[placeholder*="echerch"], input[name*="search"]'
+                    page.wait_for_selector(search_sel, timeout=5000)
+                    page.fill(search_sel, match_name)
+                    time.sleep(2)
+                except Exception:
+                    pass
 
-                prediction_btn = page.query_selector(f'[data-outcome="{prono}"], button:has-text("{prono}")')
-                if prediction_btn:
-                    prediction_btn.click()
-                    time.sleep(random.uniform(0.8, 1.5))
+                # Click prediction if visible
+                try:
+                    page.click(f'text={prono}', timeout=5000)
+                    time.sleep(1)
+                except Exception:
+                    pass
 
-            mise_input = page.query_selector('input[name="mise"], input[placeholder*="mise"]')
-            if mise_input:
-                mise_input.fill(str(mise))
+            # Set stake
+            try:
+                mise_sel = 'input[type="number"]'
+                page.wait_for_selector(mise_sel, timeout=5000)
+                page.fill(mise_sel, stake)
+                time.sleep(1)
+            except Exception:
+                pass
 
-            generate_btn = page.query_selector('button:has-text("Generer"), button:has-text("Reserver")')
-            if generate_btn:
-                generate_btn.click()
-                time.sleep(random.uniform(4, 6))
+            # Click generate/reserve button
+            try:
+                btn_sel = 'button:has-text("Générer"), button:has-text("Réserver"), button:has-text("Valider"), button:has-text("Imprimer")'
+                page.click(btn_sel, timeout=8000)
+                time.sleep(5)
+            except Exception:
+                pass
 
-            barcode_element = page.query_selector('.barcode, [class*="barcode"], img[alt*="code"]')
-            if barcode_element:
-                screenshot = barcode_element.screenshot()
-                barcode_b64 = base64.b64encode(screenshot).decode('utf-8')
-                browser.close()
-                return jsonify({
-                    "status": "success",
-                    "barcode_url": f"data:image/png;base64,{barcode_b64}"
-                })
+            # Try to grab barcode element screenshot
+            barcode_b64 = None
+            reservation_code = ""
 
-            screenshot = page.screenshot()
-            barcode_b64 = base64.b64encode(screenshot).decode('utf-8')
+            barcode_selectors = [
+                'canvas',
+                'img[alt*="barcode"], img[alt*="code"], img[src*="barcode"]',
+                'svg[class*="barcode"]',
+                '.barcode, .code-barre, .reservation-barcode, .ticket-barcode',
+                '#barcode, #code-barre'
+            ]
+
+            for sel in barcode_selectors:
+                try:
+                    el = page.query_selector(sel)
+                    if el and el.is_visible():
+                        img_bytes = el.screenshot()
+                        barcode_b64 = base64.b64encode(img_bytes).decode('utf-8')
+                        break
+                except Exception:
+                    continue
+
+            # Fallback: full page screenshot
+            if not barcode_b64:
+                img_bytes = page.screenshot(full_page=False)
+                barcode_b64 = base64.b64encode(img_bytes).decode('utf-8')
+
+            # Try to get reservation code text
+            code_selectors = [
+                '.reservation-code, .code-reservation, .ticket-code, .numero-reservation',
+                'span[class*="code"], p[class*="code"], div[class*="code"]'
+            ]
+            for sel in code_selectors:
+                try:
+                    el = page.query_selector(sel)
+                    if el:
+                        reservation_code = el.inner_text().strip()
+                        break
+                except Exception:
+                    continue
+
             browser.close()
+
             return jsonify({
-                "status": "success",
-                "barcode_url": f"data:image/png;base64,{barcode_b64}"
+                'status': 'success',
+                'barcode_url': f'data:image/png;base64,{barcode_b64}',
+                'reservation_code': reservation_code
             })
 
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "error": str(e)
-        }), 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({'status': 'ok'})
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
