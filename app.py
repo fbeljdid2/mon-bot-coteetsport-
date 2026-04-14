@@ -1,18 +1,27 @@
 from flask import Flask, request, jsonify
-from playwright.sync_api import sync_playwright
 import barcode
 from barcode.writer import ImageWriter
 import base64
 import os
 import io
 import time
+import json
+import re
+import requests as http_requests
 
 app = Flask(__name__)
 
-COTES_EMAIL = os.environ.get('COTES_EMAIL', '')
+COTES_EMAIL    = os.environ.get('COTES_EMAIL', '')
 COTES_PASSWORD = os.environ.get('COTES_PASSWORD', '')
-BASE_URL = 'https://www.coteetsport.ma'
-LOGIN_URL = 'https://zonereservee.coteetsport.ma'
+TWOCAPTCHA_KEY = os.environ.get('TWOCAPTCHA_KEY', '')
+
+LOGIN_URL  = 'https://zonereservee.coteetsport.ma'
+BETTING_URL = 'https://www.coteetsport.ma/cote-sport'
+
+# reCAPTCHA site key found on zonereservee.coteetsport.ma
+RECAPTCHA_SITE_KEY = '6LcI_T8UAAAAAJ8sMbyTFbsKHDDGDQpVLLgT73HS'
+
+# ─── Barcode generation ───────────────────────────────────────────────────────
 
 def generate_barcode_image(code):
     CODE128 = barcode.get_barcode_class('code128')
@@ -24,119 +33,202 @@ def generate_barcode_image(code):
         'background': 'white', 'foreground': 'black',
         'write_text': True, 'quiet_zone': 6.5, 'dpi': 300
     })
-    code_obj = CODE128(code, writer=writer)
+    code_obj = CODE128(str(code), writer=writer)
     code_obj.write(buffer)
     buffer.seek(0)
     return 'data:image/png;base64,' + base64.b64encode(buffer.read()).decode('utf-8')
 
-def place_ticket(matches, stake):
+# ─── 2captcha solver ──────────────────────────────────────────────────────────
+
+def solve_recaptcha(page_url, site_key):
+    """Submit captcha to 2captcha and wait for the token."""
+    if not TWOCAPTCHA_KEY:
+        raise Exception("TWOCAPTCHA_KEY not set")
+
+    print("Submitting reCAPTCHA to 2captcha...")
+    submit = http_requests.post('http://2captcha.com/in.php', data={
+        'key': TWOCAPTCHA_KEY,
+        'method': 'userrecaptcha',
+        'googlekey': site_key,
+        'pageurl': page_url,
+        'json': 1
+    })
+    result = submit.json()
+    if result.get('status') != 1:
+        raise Exception(f"2captcha submit error: {result}")
+
+    captcha_id = result['request']
+    print(f"2captcha job ID: {captcha_id} — waiting for solution...")
+
+    # Poll every 5 seconds, up to 2 minutes
+    for attempt in range(24):
+        time.sleep(5)
+        poll = http_requests.get('http://2captcha.com/res.php', params={
+            'key': TWOCAPTCHA_KEY,
+            'action': 'get',
+            'id': captcha_id,
+            'json': 1
+        })
+        poll_result = poll.json()
+        if poll_result.get('status') == 1:
+            token = poll_result['request']
+            print(f"reCAPTCHA token received (attempt {attempt+1})")
+            return token
+        elif poll_result.get('request') != 'CAPCHA_NOT_READY':
+            raise Exception(f"2captcha poll error: {poll_result}")
+
+    raise Exception("2captcha timeout: no token after 2 minutes")
+
+# ─── Playwright bot ───────────────────────────────────────────────────────────
+
+def place_ticket_and_get_code(matches, stake):
+    from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
-        context = browser.new_context(viewport={'width': 1280, 'height': 900})
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-blink-features=AutomationControlled'
+            ]
+        )
+        context = browser.new_context(
+            viewport={'width': 1280, 'height': 900},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
         page = context.new_page()
 
-        # --- LOGIN ---
+        # ── Step 1: Open login page ──
         page.goto(LOGIN_URL, timeout=30000)
-        time.sleep(2)
-        # Try to find login form
-        page.fill('input[type="email"], input[name="username"], input[name="email"]', COTES_EMAIL)
-        page.fill('input[type="password"]', COTES_PASSWORD)
-        page.click('button[type="submit"], input[type="submit"]')
         time.sleep(3)
 
-        # --- Navigate to Cote & Sport ---
-        page.goto(BASE_URL + '/cote-sport', timeout=30000)
-        time.sleep(2)
+        # ── Step 2: Fill email + password ──
+        page.fill('input[type="email"], input[name="email"]', COTES_EMAIL)
+        page.fill('input[type="password"]', COTES_PASSWORD)
+        print("Credentials filled")
 
-        reservation_code = None
+        # ── Step 3: Solve reCAPTCHA with 2captcha ──
+        token = solve_recaptcha(LOGIN_URL, RECAPTCHA_SITE_KEY)
 
-        for match in matches:
+        # Inject token into the hidden textarea that reCAPTCHA uses
+        page.evaluate(f"""
+            document.getElementById('g-recaptcha-response').innerHTML = '{token}';
+            if (typeof ___grecaptcha_cfg !== 'undefined') {{
+                Object.entries(___grecaptcha_cfg.clients).forEach(([key, client]) => {{
+                    if (client && client.l && typeof client.l.callback === 'function') {{
+                        client.l.callback('{token}');
+                    }}
+                }});
+            }}
+        """)
+        time.sleep(1)
+
+        # ── Step 4: Submit login form ──
+        page.click('button[type="submit"], button:has-text("Se connecter")')
+        time.sleep(5)
+        print("Login submitted")
+
+        # ── Step 5: Verify login ──
+        content = page.content()
+        if 'Se connecter' in content and 'Mon compte' not in content:
+            browser.close()
+            raise Exception("Login failed — check credentials or reCAPTCHA site key")
+        print("Login successful!")
+
+        # ── Step 6: Navigate to betting page ──
+        page.goto(BETTING_URL, timeout=30000)
+        time.sleep(3)
+
+        # ── Step 7: Add selections to betslip ──
+        for match_data in matches:
+            match_text = match_data.get('match', '')
+            prono      = match_data.get('prono', '')
+            print(f"Selecting: {match_text} → {prono}")
+            # The site loads matches dynamically; we click directly on odds buttons
+            # by matching text content of the match rows
             try:
-                home = match.get('home_team', '')
-                away = match.get('away_team', '')
-                prediction = match.get('prediction_value', '1')  # '1', 'X', '2'
-
-                # Search for the match on the page
-                page.goto(BASE_URL + '/cote-sport', timeout=20000)
-                time.sleep(2)
-
-                # Find match by team names
-                match_elem = page.locator(f'text={home}').first
-                if match_elem:
-                    match_elem.click()
-                    time.sleep(1)
-
-                # Click the prediction button (1, X, or 2)
-                pred_map = {'1': 0, 'X': 1, '2': 2}
-                pred_idx = pred_map.get(prediction, 0)
-                odds_buttons = page.locator('.odds-button, .bet-button, [class*="odd"], [class*="bet"]').all()
-                if len(odds_buttons) > pred_idx:
-                    odds_buttons[pred_idx].click()
-                    time.sleep(1)
+                page.wait_for_load_state('networkidle', timeout=10000)
+                # Find match row by team name
+                teams = match_text.split(' vs ')
+                if teams:
+                    row = page.locator(f'text="{teams[0].strip()}"').first
+                    if row.is_visible(timeout=3000):
+                        # Navigate to match page and select the prono
+                        row.click()
+                        time.sleep(2)
             except Exception as e:
-                print(f'Match selection error: {e}')
-                continue
+                print(f"Selection error for {match_text}: {e}")
 
-        # --- Set stake ---
-        try:
-            stake_input = page.locator('input[placeholder*="mise"], input[placeholder*="stake"], input[placeholder*="Mise"], .stake-input').first
-            stake_input.fill(str(stake))
-            time.sleep(1)
-        except Exception as e:
-            print(f'Stake error: {e}')
-
-        # --- Submit ticket ---
-        try:
-            page.click('button:has-text("Valider"), button:has-text("Jouer"), button:has-text("Confirmer"), [class*="submit"]')
-            time.sleep(3)
-
-            # Capture reservation code from confirmation
-            page_text = page.inner_text('body')
-            import re
-            # Look for reservation/ticket code patterns
-            patterns = [
-                r'[Rr][eé]servation[s:]+([A-Z0-9-]{6,20})',
-                r'[Tt]icket[s:]+([A-Z0-9-]{6,20})',
-                r'[Cc]ode[s:]+([A-Z0-9-]{6,20})',
-                r'N[°o][s:]+([0-9]{6,15})',
-                r'([0-9]{8,15})',
-            ]
-            for pattern in patterns:
-                match_code = re.search(pattern, page_text)
-                if match_code:
-                    reservation_code = match_code.group(1)
+        # ── Step 8: Set stake ──
+        time.sleep(2)
+        for sel in ['input[placeholder*="Mise"]', 'input[placeholder*="mise"]',
+                    '[class*="stake"] input', '[class*="betslip"] input[type="number"]']:
+            try:
+                el = page.locator(sel).first
+                if el.is_visible(timeout=2000):
+                    el.triple_click()
+                    el.fill(str(stake))
+                    print(f"Stake {stake} MAD set")
                     break
-        except Exception as e:
-            print(f'Submit error: {e}')
+            except:
+                pass
+
+        # ── Step 9: Submit ticket ──
+        reservation_code = None
+        for sel in ['button:has-text("Valider le coupon")', 'button:has-text("Valider")',
+                    'button:has-text("Jouer")', 'button:has-text("Confirmer")',
+                    '[class*="submit-bet"]', '[class*="place-bet"]']:
+            try:
+                btn = page.locator(sel).first
+                if btn.is_visible(timeout=2000):
+                    btn.click()
+                    print(f"Ticket submitted via: {sel}")
+                    time.sleep(6)
+                    break
+            except:
+                pass
+
+        # ── Step 10: Extract reservation code ──
+        page_text = page.inner_text('body')
+        page.screenshot(path='/tmp/confirmation.png')
+
+        patterns = [
+            r'[Rr][eé]servations*[:#]?s*([A-Z0-9-]{6,20})',
+            r'[Tt]ickets*[:#]?s*([A-Z0-9-]{6,20})',
+            r'[Cc]oupons*[:#]?s*([A-Z0-9-]{6,20})',
+            r'[Cc]odes*[:#]?s*([A-Z0-9-]{6,20})',
+            r'N[°o.]s*([0-9]{6,15})',
+            r'([0-9]{8,15})',
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, page_text)
+            if m:
+                reservation_code = m.group(1).strip()
+                print(f"Reservation code: {reservation_code}")
+                break
 
         browser.close()
         return reservation_code
 
+# ─── Flask routes ─────────────────────────────────────────────────────────────
+
 @app.route('/generate', methods=['POST'])
 def generate():
-    data = request.json
-    ticket_id = data.get('ticket_id', 'TICKET')
-    stake = data.get('stake', 10)
-    matches = data.get('matches', [])
+    data      = request.json
+    stake     = data.get('stake', 10)
+    matches   = data.get('matches', [])
 
-    reservation_code = None
-
-    if COTES_EMAIL and COTES_PASSWORD:
-        try:
-            reservation_code = place_ticket(matches, stake)
-        except Exception as e:
-            print(f'Bot error: {e}')
+    reservation_code = place_ticket_and_get_code(matches, stake)
 
     if not reservation_code:
-        import hashlib
-        raw = f"{ticket_id}-{stake}-{len(matches)}-{int(time.time())}"
-        reservation_code = 'RES' + hashlib.md5(raw.encode()).hexdigest()[:10].upper()
-
-    barcode_url = generate_barcode_image(reservation_code)
+        return jsonify({
+            'status': 'error',
+            'message': 'Could not extract reservation code from confirmation page'
+        }), 400
 
     return jsonify({
         'status': 'success',
-        'barcode_url': barcode_url,
+        'barcode_url': generate_barcode_image(reservation_code),
         'reservation_code': reservation_code
     })
 
@@ -145,5 +237,4 @@ def health():
     return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
