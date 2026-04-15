@@ -7,5 +7,4 @@ RUN playwright install chromium
 
 COPY app.py .
 
-EXPOSE 8080
-CMD gunicorn app:app --bind 0.0.0.0:8080 --timeout 300 --workers 1
+CMD gunicorn app:app --bind 0.0.0.0:$PORT --timeout 300 --workers 1
