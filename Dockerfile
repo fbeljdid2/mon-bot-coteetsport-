@@ -6,5 +6,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 
 COPY app.py .
+COPY start.sh .
+RUN chmod +x start.sh
 
-CMD sh -c "gunicorn app:app --bind 0.0.0.0:${PORT:-8080} --timeout 180 --workers 1"
+CMD ["./start.sh"]
