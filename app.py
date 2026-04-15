@@ -231,7 +231,9 @@ def generate():
         'barcode_url': generate_barcode_image(reservation_code),
         'reservation_code': reservation_code
     })
-
+@app.route('/', methods=['GET'])
+def index():
+    return jsonify({'status': 'ok', 'service': 'CoteEtSport Bot'})
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok'})
