@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import asyncio
 import uvicorn
+import os
 from scraper import scrape_matches
 from executor import execute_ticket
 
