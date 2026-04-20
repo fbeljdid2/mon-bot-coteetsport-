@@ -9,7 +9,7 @@ from playwright.async_api import async_playwright
 from datetime import datetime
 
 SITE_URL = "https://www.coteetsport.ma"
-FOOTBALL_URL = f"{SITE_URL}/cote-sport/sport/football"
+FOOTBALL_URL = f"{SITE_URL}/cote-sport/"
 
 # ─────────────────────────────────────────────────────────────
 # SÉLECTEURS CSS RÉELS — inspectés sur coteetsport.ma (avril 2025)
@@ -56,14 +56,28 @@ async def scrape_matches(date_str=None):
             # On navigue vers l'onglet "Demain" si date_str == demain, sinon on reste sur Tous
             url = FOOTBALL_URL  # à affiner selon besoin
 
-        await page.goto(url, wait_until="networkidle", timeout=40000)
+        await page.goto(url, wait_until="networkidle", timeout=60000)
+        await asyncio.sleep(3)  # laisser le JS se charger
 
         # Attendre que les lignes de matchs soient présentes
-        await page.wait_for_selector(".event-row, [data-event-id]", timeout=20000)
+        try:
+            await page.wait_for_selector(
+                ".event-row, [data-event-id], .match-row, .sport-event, li.event",
+                timeout=25000
+            )
+        except Exception:
+            print("[scraper] Aucun sélecteur standard trouvé, tentative fallback...")
 
-        # Récupérer tous les blocs de matchs
-        event_rows = await page.query_selector_all(".event-row, tr[data-event-id]")
-        print(f"[scraper] {len(event_rows)} matchs trouvés")
+        # Récupérer tous les blocs de matchs avec plusieurs sélecteurs possibles
+        event_rows = await page.query_selector_all(
+            ".event-row, tr[data-event-id], .match-row, .sport-event, li.event, [data-match-id]"
+        )
+        print(f"[scraper] {len(event_rows)} matchs trouvés sur {url}")
+
+        # Dump HTML pour debug si rien trouvé
+        if len(event_rows) == 0:
+            html_snippet = await page.evaluate("document.body.innerHTML.substring(0, 2000)")
+            print(f"[scraper] HTML snippet: {html_snippet}")
 
         for row in event_rows:
             try:
